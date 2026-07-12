@@ -1,11 +1,515 @@
 \chapter{分布式传感系统缺失数据补全方法研究}
+
 \section{引言}
-分布式传感网络具有广泛的应用前景，尤其在环境监测、智能交通、工业自动化和机器人系统中，能够提供对复杂环境的实时感知和状态估计。然而在实际应用中，传感器节点可能由于硬件故障、通信中断、环境干扰和人为失误等因素导致数据缺失问题，从而影响系统的整体性能。科研人员针对数据缺失提出了很多解决方案，
 
-\section{总体方法}
+分布式传感系统通过在被测对象或监测区域内部署多个传感节点，实现对空间状态和动态过程的连续感知，已广泛应用于环境监测、结构健康监测、智能交通、工业自动化以及机器人状态估计等领域。与单一传感器相比，分布式传感系统能够从多个位置、多个方向和多个物理维度获取观测信息，具有感知范围广、信息冗余度高和局部故障容忍能力强等特点。然而，传感器节点在长期运行过程中容易受到硬件故障、供电异常、通信中断、存储错误和环境干扰等因素影响，导致采集数据出现随机缺失或连续缺失。对于依赖时间积分、状态递推或多节点融合的应用，即使局部缺失数据所占比例较低，也可能破坏时间序列的连续性，并使误差在后续计算过程中逐渐累积。
 
-本节内容待补充。
+现有缺失数据补全方法大致可以分为统计插补、机器学习补全和深度学习补全三类。均值填充、线性插值和最近观测值填充等统计方法具有计算量小、实现简单的特点，但难以描述高维传感数据中的非线性关系。K近邻、多重链式方程和随机森林等机器学习方法可以利用变量间相关性，在中小规模数据集上通常具有较好的稳定性。近年来，循环神经网络、自注意力网络和生成式模型被用于多变量时间序列补全，进一步提高了模型对复杂时间依赖关系的表达能力\cite{wang2025deep,cao2018brits,du2023saits}。但是，模型复杂度的增加并不必然带来补全性能的稳定提升。已有IMU数据基准研究表明，不同算法的性能会受到缺失率、缺失模式、采样频率和传感通道类型等因素的共同影响，复杂深度模型在样本规模有限或参数未经充分调整时甚至可能弱于传统方法\cite{zhou2026benchmark}。
 
-\section{模型与实验设计}
+分布式传感数据还具有区别于一般时间序列的空间结构。相邻节点通常受到相同外部载荷或运动状态的影响，因此节点观测之间具有一定的空间相关性和物理耦合关系。在海床地形与地层变形监测中，结合节点时间相关系数和空间距离能够有效筛选与故障节点高度相关的邻近节点，说明空间拓扑信息可以为缺失数据补全提供额外依据\cite{ge2024spatiotemporal}。然而，仅依靠相关回归仍然难以完整描述高频、非平稳传感信号中的复杂动态过程；另一方面，仅最小化逐点重构误差的深度学习模型也可能产生数值误差较小但不满足运动学规律的补全结果。
 
-本节内容待补充。
+针对上述问题，本章构建一种基于空间相关信息和物理信息约束的混合时序补全方法。该方法首先根据节点间的观测相关性和几何距离形成邻域辅助特征，随后采用双向液体神经网络和双向长短期记忆网络分别提取局部非规则动态特征与长时间依赖特征，并通过可学习门控单元对两个分支的输出进行自适应融合。在模型训练过程中，进一步引入加速度与速度之间的运动学关系作为物理约束，使补全结果同时满足数据重构精度和运动状态一致性要求。实验部分分别设置随机缺失和连续通道缺失模式，并从逐点重构误差、下游轨迹误差和模型计算效率三个方面评价补全方法的性能。
+
+\section{分布式传感系统缺失数据问题定义}
+
+\subsection{系统模型与数据表示}
+
+考虑由$N$个传感节点组成的分布式传感系统，节点集合表示为
+$\mathcal{V}=\{v_1,v_2,\ldots,v_N\}$。第$i$个节点的空间位置记为
+$\boldsymbol{p}_i=[p_i^x,p_i^y,p_i^z]^\mathrm{T}$，节点在时刻$t$采集的
+$d$维观测向量表示为
+\begin{equation}
+    \boldsymbol{x}_{i,t}
+    =
+    \left[
+    x_{i,t}^{(1)},x_{i,t}^{(2)},\ldots,x_{i,t}^{(d)}
+    \right]^\mathrm{T}.
+\end{equation}
+对于六轴惯性传感器，$\boldsymbol{x}_{i,t}$通常由三轴加速度和三轴角速度组成，即
+\begin{equation}
+    \boldsymbol{x}_{i,t}
+    =
+    \left[
+    a_{i,t}^{x},a_{i,t}^{y},a_{i,t}^{z},
+    \omega_{i,t}^{x},\omega_{i,t}^{y},\omega_{i,t}^{z}
+    \right]^\mathrm{T}.
+\end{equation}
+当系统同时采集应变、姿态、磁场或位置信息时，可以在上述向量中增加相应的观测通道。
+
+将连续$T$个时刻的节点观测组合，可以得到完整数据张量
+\begin{equation}
+    \boldsymbol{X}
+    =
+    \left\{
+    \boldsymbol{x}_{i,t}
+    \mid t=1,\ldots,T,\;i=1,\ldots,N
+    \right\}
+    \in \mathbb{R}^{T\times N\times d}.
+\end{equation}
+定义与$\boldsymbol{X}$具有相同维度的二值掩码张量
+$\boldsymbol{M}\in\{0,1\}^{T\times N\times d}$，其中
+\begin{equation}
+    m_{t,i,k}
+    =
+    \begin{cases}
+        1, & x_{t,i,k}\text{可观测},\\
+        0, & x_{t,i,k}\text{缺失}.
+    \end{cases}
+\end{equation}
+经过掩码处理后的不完整数据表示为
+\begin{equation}
+    \boldsymbol{X}^{\mathrm{obs}}
+    =
+    \boldsymbol{M}\odot\boldsymbol{X}
+    +(1-\boldsymbol{M})\odot\boldsymbol{C},
+\end{equation}
+其中，$\odot$表示Hadamard逐元素乘积，$\boldsymbol{C}$表示缺失位置的初始化值。若数据已经进行零均值标准化，可以将$\boldsymbol{C}$设置为零；也可以采用均值填充或最近观测值填充获得初始估计。
+
+缺失数据补全的目标是学习参数化映射$f_{\boldsymbol{\theta}}(\cdot)$，根据不完整观测、掩码信息、节点空间关系和采样时间间隔估计完整数据：
+\begin{equation}
+    \widehat{\boldsymbol{X}}
+    =
+    f_{\boldsymbol{\theta}}
+    \left(
+    \boldsymbol{X}^{\mathrm{obs}},
+    \boldsymbol{M},
+    \boldsymbol{P},
+    \Delta\boldsymbol{T}
+    \right),
+\end{equation}
+其中，$\boldsymbol{P}=[\boldsymbol{p}_1,\ldots,\boldsymbol{p}_N]$为节点位置集合，$\Delta\boldsymbol{T}$为相邻观测的时间间隔。为了避免模型修改原始有效观测值，最终输出定义为
+\begin{equation}
+    \widetilde{\boldsymbol{X}}
+    =
+    \boldsymbol{M}\odot\boldsymbol{X}^{\mathrm{obs}}
+    +(1-\boldsymbol{M})\odot\widehat{\boldsymbol{X}}.
+\end{equation}
+
+\subsection{缺失数据描述}
+
+缺失机制用于描述数据值与缺失事件之间的统计关系。设
+$\boldsymbol{X}^{\mathrm{obs}}$和$\boldsymbol{X}^{\mathrm{mis}}$
+分别表示可观测部分和缺失部分，则常见缺失机制包括完全随机缺失、随机缺失和非随机缺失。
+
+完全随机缺失（Missing Completely at Random，MCAR）表示缺失概率与数据本身无关：
+\begin{equation}
+    P(\boldsymbol{M}\mid\boldsymbol{X})
+    =
+    P(\boldsymbol{M}).
+\end{equation}
+该机制可用于模拟随机通信丢包、瞬时电磁干扰等与测量值无直接关系的故障。
+
+随机缺失（Missing at Random，MAR）表示缺失概率可以依赖已观测数据，但不依赖缺失值本身：
+\begin{equation}
+    P(\boldsymbol{M}\mid
+    \boldsymbol{X}^{\mathrm{obs}},
+    \boldsymbol{X}^{\mathrm{mis}})
+    =
+    P(\boldsymbol{M}\mid\boldsymbol{X}^{\mathrm{obs}}).
+\end{equation}
+例如，某一节点的通信状态可能受到其他已观测环境变量影响，但与当前未记录的传感数值无直接关系。
+
+非随机缺失（Missing Not at Random，MNAR）表示缺失事件与缺失值本身相关：
+\begin{equation}
+    P(\boldsymbol{M}\mid
+    \boldsymbol{X}^{\mathrm{obs}},
+    \boldsymbol{X}^{\mathrm{mis}})
+    \neq
+    P(\boldsymbol{M}\mid\boldsymbol{X}^{\mathrm{obs}}).
+\end{equation}
+传感器量程饱和是典型的MNAR现象。例如，当冲击加速度超过传感器测量范围时，相应数据可能被截断或丢失。由于缺失值的真实分布不能由已观测样本充分表示，MNAR通常比MCAR和MAR更难处理。
+
+缺失机制与缺失模式是两个不同概念。缺失机制描述缺失事件的产生概率，缺失模式则描述缺失位置在时间、节点和通道维度上的结构。结合分布式传感系统中的典型故障，可以将缺失模式归纳为以下四类：
+
+\begin{enumerate}
+    \item 随机缺失：缺失位置分散在不同时间、节点和通道中，主要用于模拟随机通信丢包和瞬时干扰；
+    \item 同时刻缺失：某一连续时间区间内多个节点或全部通道同时失效，主要对应供电中断、数据采集模块重启或总线通信故障；
+    \item 连续节点或通道缺失：某一节点或某一物理通道在连续时间区间内不可用，主要对应节点硬件故障、线路脱落或模数转换通道失效；
+    \item 混合缺失：随机缺失和连续缺失同时存在，更接近长期运行条件下的实际故障状态。
+\end{enumerate}
+
+缺失率定义为缺失元素数量与全部元素数量之比：
+\begin{equation}
+    r_{\mathrm{mis}}
+    =
+    1-
+    \frac{1}{TNd}
+    \sum_{t=1}^{T}
+    \sum_{i=1}^{N}
+    \sum_{k=1}^{d}
+    m_{t,i,k}.
+\end{equation}
+除总体缺失率外，连续缺失区间长度同样会显著影响补全难度。当连续缺失区间逐渐增大时，缺失位置附近能够利用的局部时间信息减少，模型需要更多依赖远距离时间特征和其他传感节点的信息。因此，实验中应同时控制缺失率与连续缺失长度，避免仅以随机独立缺失评价模型性能\cite{zhou2026benchmark}。
+
+\section{基于物理信息约束的混合时序补全方法}
+
+\subsection{补全问题建模与输入构造}
+
+分布式传感系统中不同节点通常测量同一结构或运动过程。节点之间的观测不仅具有时间相关性，还受到空间位置和结构连接关系影响。为获得故障节点的邻域辅助信息，首先计算节点$i$和节点$j$在共同有效观测集合$\Omega_{ij}$上的Pearson相关系数：
+\begin{equation}
+    \rho_{ij}
+    =
+    \frac{
+    \sum_{t\in\Omega_{ij}}
+    (x_{i,t}-\overline{x}_i)
+    (x_{j,t}-\overline{x}_j)
+    }{
+    \sqrt{
+    \sum_{t\in\Omega_{ij}}
+    (x_{i,t}-\overline{x}_i)^2
+    }
+    \sqrt{
+    \sum_{t\in\Omega_{ij}}
+    (x_{j,t}-\overline{x}_j)^2
+    }
+    }.
+\end{equation}
+对于多通道传感器，可以分别计算各通道相关系数，再采用均值或加权平均得到节点级相关系数。
+
+节点间欧氏距离表示为
+\begin{equation}
+    d_{ij}
+    =
+    \left\|
+    \boldsymbol{p}_i-\boldsymbol{p}_j
+    \right\|_2.
+\end{equation}
+将距离归一化后，通过高斯核函数构造空间权重：
+\begin{equation}
+    w_{ij}^{\mathrm{s}}
+    =
+    \exp\left(
+    -\frac{\overline{d}_{ij}^{\,2}}{2\sigma^2}
+    \right),
+\end{equation}
+其中，$\overline{d}_{ij}$为归一化距离，$\sigma$控制空间邻域的作用范围。综合时间相关性与空间邻近性，定义节点关联权重
+\begin{equation}
+    a_{ij}
+    =
+    |\rho_{ij}|w_{ij}^{\mathrm{s}}.
+\end{equation}
+该构造保留了海床分布式传感监测中“相关系数与节点距离联合筛选”的基本思想\cite{ge2024spatiotemporal}，但不引入潮汐分段等特定场景条件。
+
+对于节点$i$，选择关联权重最大的$K$个节点构成邻域
+$\mathcal{N}_i$。在时刻$t$，邻域聚合特征表示为
+\begin{equation}
+    \overline{\boldsymbol{x}}_{i,t}
+    =
+    \frac{
+    \sum_{j\in\mathcal{N}_i}
+    a_{ij}\boldsymbol{m}_{j,t}
+    \odot\boldsymbol{x}_{j,t}^{\mathrm{obs}}
+    }{
+    \sum_{j\in\mathcal{N}_i}
+    a_{ij}\boldsymbol{m}_{j,t}
+    +\varepsilon
+    },
+\end{equation}
+其中，$\varepsilon$为防止分母为零而设置的正数。模型输入由节点自身观测、缺失掩码、距离上一次有效观测的时间间隔以及邻域聚合特征共同组成：
+\begin{equation}
+    \boldsymbol{z}_{i,t}
+    =
+    \left[
+    \boldsymbol{x}_{i,t}^{\mathrm{obs}};
+    \boldsymbol{m}_{i,t};
+    \Delta\boldsymbol{t}_{i,t};
+    \overline{\boldsymbol{x}}_{i,t}
+    \right].
+\end{equation}
+当系统中不存在可用邻近节点时，可以省略
+$\overline{\boldsymbol{x}}_{i,t}$，此时模型退化为单节点多通道时间序列补全模型。
+
+\subsection{混合时序模型与训练目标}
+
+为了同时描述局部非规则动态和长时间依赖关系，本章采用双向液体神经网络与双向长短期记忆网络构成并行时序特征提取结构。
+
+\paragraph{双向液体神经网络}
+
+液体神经网络通过连续时间动态方程描述隐状态变化。其基本状态方程可以写为
+\begin{equation}
+    \frac{\mathrm{d}\boldsymbol{h}(t)}{\mathrm{d}t}
+    =
+    -
+    \left[
+    \frac{1}{\boldsymbol{\tau}}
+    +f_{\boldsymbol{\theta}}
+    \bigl(\boldsymbol{h}(t),\boldsymbol{z}(t)\bigr)
+    \right]\boldsymbol{h}(t)
+    +
+    f_{\boldsymbol{\theta}}
+    \bigl(\boldsymbol{h}(t),\boldsymbol{z}(t)\bigr)
+    \boldsymbol{A},
+\end{equation}
+其中，$\boldsymbol{\tau}$为可学习时间常数，
+$f_{\boldsymbol{\theta}}(\cdot)$为非线性映射。可学习时间常数使网络能够根据当前输入动态调整状态响应速度，适合描述高频传感信号中的局部变化和非均匀采样现象。
+
+为避免在每次前向传播过程中调用数值微分方程求解器，采用闭式连续时间网络构造近似更新：
+\begin{equation}
+    \boldsymbol{h}_{t}
+    =
+    \sigma\left(
+    -\boldsymbol{F}_{t}\Delta t
+    \right)\odot\boldsymbol{G}_{t}
+    +
+    \left[
+    1-\sigma\left(
+    -\boldsymbol{F}_{t}\Delta t
+    \right)
+    \right]\odot\boldsymbol{H}_{t},
+\end{equation}
+其中，$\boldsymbol{F}_{t}$、$\boldsymbol{G}_{t}$和
+$\boldsymbol{H}_{t}$由共享特征网络根据当前输入和历史状态计算。分别沿正向和反向处理序列，得到双向液体网络隐状态
+\begin{equation}
+    \boldsymbol{h}_{t}^{\mathrm{L}}
+    =
+    \left[
+    \overrightarrow{\boldsymbol{h}}_{t}^{\mathrm{L}};
+    \overleftarrow{\boldsymbol{h}}_{t}^{\mathrm{L}}
+    \right].
+\end{equation}
+双向处理使缺失位置可以同时利用其前后时刻的观测信息。
+
+\paragraph{双向长短期记忆网络}
+
+双向长短期记忆网络分别从正向和反向提取序列特征：
+\begin{align}
+    \overrightarrow{\boldsymbol{h}}_{t}^{\mathrm{S}}
+    &=
+    \operatorname{LSTM}
+    \left(
+    \boldsymbol{z}_{t},
+    \overrightarrow{\boldsymbol{h}}_{t-1}^{\mathrm{S}}
+    \right),\\
+    \overleftarrow{\boldsymbol{h}}_{t}^{\mathrm{S}}
+    &=
+    \operatorname{LSTM}
+    \left(
+    \boldsymbol{z}_{t},
+    \overleftarrow{\boldsymbol{h}}_{t+1}^{\mathrm{S}}
+    \right).
+\end{align}
+其输出隐状态为
+\begin{equation}
+    \boldsymbol{h}_{t}^{\mathrm{S}}
+    =
+    \left[
+    \overrightarrow{\boldsymbol{h}}_{t}^{\mathrm{S}};
+    \overleftarrow{\boldsymbol{h}}_{t}^{\mathrm{S}}
+    \right].
+\end{equation}
+液体网络对局部动态和时间间隔变化较为敏感，而长短期记忆网络更适合提取长时间范围内的状态依赖关系，两者在传感时间序列补全任务中具有互补性。
+
+\paragraph{自适应门控融合}
+
+设置两个预测头，将双向液体网络和双向长短期记忆网络的隐状态分别映射为残差估计
+$\widehat{\boldsymbol{R}}_{t}^{\mathrm{L}}$和
+$\widehat{\boldsymbol{R}}_{t}^{\mathrm{S}}$。为了根据运动状态和传感通道动态调整两个分支的贡献，采用两层感知机生成门控向量：
+\begin{equation}
+    \boldsymbol{g}_{t}
+    =
+    \operatorname{sigmoid}
+    \left[
+    \boldsymbol{W}_2
+    \operatorname{ReLU}
+    \left(
+    \boldsymbol{W}_1\boldsymbol{q}_{t}
+    +\boldsymbol{b}_1
+    \right)
+    +\boldsymbol{b}_2
+    \right],
+\end{equation}
+其中
+\begin{equation}
+    \boldsymbol{q}_{t}
+    =
+    \left[
+    \boldsymbol{h}_{t}^{\mathrm{L}};
+    \boldsymbol{h}_{t}^{\mathrm{S}};
+    \boldsymbol{z}_{t};
+    \left|
+    \widehat{\boldsymbol{R}}_{t}^{\mathrm{L}}
+    -
+    \widehat{\boldsymbol{R}}_{t}^{\mathrm{S}}
+    \right|
+    \right].
+\end{equation}
+两个预测分支之间的差异可以反映模型估计的不确定程度。最终融合结果表示为
+\begin{equation}
+    \widehat{\boldsymbol{x}}_{t}
+    =
+    \boldsymbol{x}_{t}^{\mathrm{base}}
+    +
+    \boldsymbol{g}_{t}
+    \odot\widehat{\boldsymbol{R}}_{t}^{\mathrm{L}}
+    +
+    (1-\boldsymbol{g}_{t})
+    \odot\widehat{\boldsymbol{R}}_{t}^{\mathrm{S}},
+\end{equation}
+其中，$\boldsymbol{x}_{t}^{\mathrm{base}}$为均值填充或最近观测值填充得到的初始结果。采用残差学习可以减少网络直接重建完整信号的难度，并使门控单元主要学习不同动态条件下两个分支的相对贡献。
+
+\paragraph{物理信息约束}
+
+在具有完整训练数据的条件下，通过人工掩蔽构造训练样本。设
+$\boldsymbol{H}$表示训练阶段人工隐藏位置，重构损失仅在这些位置计算：
+\begin{equation}
+    \mathcal{L}_{\mathrm{rec}}
+    =
+    \frac{1}{N_{\mathrm{hid}}}
+    \left\|
+    \boldsymbol{H}
+    \odot
+    \left(
+    \boldsymbol{X}
+    -
+    \widehat{\boldsymbol{X}}
+    \right)
+    \right\|_F^2,
+\end{equation}
+其中，$N_{\mathrm{hid}}$为人工隐藏元素数量。对于不存在完整标签的实测数据，可以从已有观测位置中随机选取一部分数据作为自监督训练目标。
+
+仅最小化重构损失不能保证补全结果满足运动学规律。对于惯性传感数据，加速度和速度应满足
+\begin{equation}
+    \boldsymbol{a}_{i,t}
+    \approx
+    \frac{
+    \boldsymbol{v}_{i,t}
+    -
+    \boldsymbol{v}_{i,t-1}
+    }{\Delta t}.
+\end{equation}
+因此，定义物理信息约束损失
+\begin{equation}
+    \mathcal{L}_{\mathrm{phy}}
+    =
+    \frac{1}{N(T-1)}
+    \sum_{i=1}^{N}
+    \sum_{t=2}^{T}
+    \left\|
+    \frac{
+    \widehat{\boldsymbol{v}}_{i,t}
+    -
+    \widehat{\boldsymbol{v}}_{i,t-1}
+    }{\Delta t}
+    -
+    \widehat{\boldsymbol{a}}_{i,t}
+    \right\|_2^2.
+\end{equation}
+计算该损失前，应将标准化后的网络输出恢复到实际物理量纲，避免不同量纲造成约束失真。速度可以由外部位姿测量获得，也可以由经过标定和漂移修正后的加速度积分得到。该约束主要作用于加速度通道，角速度通道仍通过数据重构损失进行训练。
+
+模型总损失为
+\begin{equation}
+    \mathcal{L}_{\mathrm{total}}
+    =
+    \mathcal{L}_{\mathrm{rec}}
+    +
+    \lambda_{\mathrm{phy}}
+    \mathcal{L}_{\mathrm{phy}},
+\end{equation}
+其中，$\lambda_{\mathrm{phy}}$用于平衡逐点重构精度与运动学一致性。$\lambda_{\mathrm{phy}}$过小时，物理约束难以对模型训练产生有效影响；过大时，模型可能过度满足简化物理关系而损失对原始信号细节的拟合能力。因此，需要通过验证集或消融实验确定该参数。
+
+模型训练与补全流程可以概括为：首先对原始数据进行异常值剔除和标准化处理；其次生成训练掩码并计算节点空间相关矩阵；然后构造包含节点观测、掩码、时间间隔和邻域信息的滑动时间窗口；随后将窗口数据同时输入双向液体网络和双向长短期记忆网络；通过门控单元融合两个分支的残差输出，并根据重构损失和物理约束损失更新模型参数；最后恢复原始量纲，并以模型预测值替换缺失位置。
+
+\section{实验设计与评价方法}
+
+\subsection{数据集、缺失设置与对比方法}
+
+混合时序模型的主要验证数据采用Oxford Inertial Odometry Dataset。该数据集包含手持设备采集的三轴加速度、三轴角速度、姿态、重力和磁场等信息，并提供由Vicon运动捕捉系统获得的高精度位姿真值。实验选取不同携带方式和运动状态下的八类场景，包括平稳携带、手持行走、慢速行走、跑步和推车运动等，数据总量约为$2\times10^6$个采样点。模型输出设置为六维，分别对应三轴加速度和三轴角速度。
+
+为避免同一记录文件中的相邻样本同时进入训练集和测试集，数据按照记录文件进行划分，其中训练集、验证集和测试集比例分别为$80\%$、$10\%$和$10\%$。各传感通道采用训练集统计量进行Z-score标准化：
+\begin{equation}
+    x'_{i,t,k}
+    =
+    \frac{
+    x_{i,t,k}-\mu_k
+    }{\sigma_k},
+\end{equation}
+其中，$\mu_k$和$\sigma_k$分别为训练集中第$k$个通道的均值和标准差。验证集和测试集必须使用训练集统计量进行变换，以避免数据泄漏。
+
+空间相关性部分可采用八节点MEMS传感阵列数据进行辅助验证。该阵列包含四个水平节点和四个竖直节点，相邻节点初始间距为$0.5\,\mathrm{m}$，共包含1307组连续观测\cite{ge2024spatiotemporal}。该数据仅用于检验相关系数与空间距离联合筛选是否能够找到有效邻近节点，不引入原论文中的潮汐分段模型。
+
+实验采用MCAR机制生成随机缺失数据，并设置随机缺失和连续通道缺失两种主要模式。随机缺失用于模拟无线通信丢包和瞬时干扰；连续通道缺失用于模拟节点线路故障或单轴传感通道长时间失效。两种模式的缺失率均设置为$10\%$、$20\%$、$30\%$和$40\%$。为降低随机掩码造成的偶然性，每组实验至少重复五次，并报告均值和标准差。
+
+对比方法包括：
+
+\begin{enumerate}
+    \item 最近观测值填充，用于评价极低计算复杂度下的补全性能；
+    \item 多重链式方程补全，用于评价基于多变量条件回归的传统方法；
+    \item GRU模型，用于评价轻量循环神经网络的补全性能；
+    \item Transformer模型，用于评价自注意力结构对长时间依赖关系的建模能力；
+    \item 单独的双向液体神经网络和双向长短期记忆网络，用于分析两个基础分支的性能；
+    \item 不含物理损失的混合模型，用于评价门控融合机制的作用；
+    \item 包含物理约束的完整混合模型，用于评价物理信息约束的有效性。
+\end{enumerate}
+
+所有可学习模型应采用相同的训练集划分、缺失掩码和训练轮数。根据现有实验设置，滑动窗口长度可设置为50，批量大小设置为32，采用Adam优化器，初始学习率为$1\times10^{-3}$，权重衰减系数为$1\times10^{-5}$，训练轮数为50。双向液体网络和双向长短期记忆网络的隐藏单元数可分别设置为128和64。物理损失权重初始设置为
+$\lambda_{\mathrm{phy}}=0.2$，并通过消融实验考察不同权重对模型性能的影响。
+
+\subsection{评价指标与实现细节}
+
+模型性能从补全精度、物理任务性能和计算效率三个方面进行评价。
+
+首先，仅在人工设置的缺失位置计算均方根误差：
+\begin{equation}
+    \mathrm{RMSE}
+    =
+    \sqrt{
+    \frac{1}{N_{\mathrm{mis}}}
+    \sum_{t,i,k}
+    (1-m_{t,i,k})
+    \left(
+    x_{t,i,k}
+    -
+    \widehat{x}_{t,i,k}
+    \right)^2
+    }.
+\end{equation}
+RMSE对较大误差较为敏感，能够反映模型在突变信号和连续缺失区间中的重构能力。
+
+平均绝对误差定义为
+\begin{equation}
+    \mathrm{MAE}
+    =
+    \frac{1}{N_{\mathrm{mis}}}
+    \sum_{t,i,k}
+    (1-m_{t,i,k})
+    \left|
+    x_{t,i,k}
+    -
+    \widehat{x}_{t,i,k}
+    \right|.
+\end{equation}
+与RMSE相比，MAE受少量异常误差的影响较小，可以反映补全结果的平均偏差。
+
+对于具有位姿真值的数据，进一步采用绝对轨迹误差评价补全数据对下游任务的影响：
+\begin{equation}
+    \mathrm{ATE}
+    =
+    \frac{1}{T}
+    \sum_{t=1}^{T}
+    \left\|
+    \widehat{\boldsymbol{p}}_t
+    -
+    \boldsymbol{p}^{\mathrm{gt}}_t
+    \right\|_2,
+\end{equation}
+其中，$\widehat{\boldsymbol{p}}_t$为根据补全后的惯性数据积分得到的轨迹，
+$\boldsymbol{p}^{\mathrm{gt}}_t$为经过时间同步和坐标对齐后的位姿真值。ATE能够反映局部补全误差在积分过程中的累积效应，因此比单独使用RMSE更接近惯性导航和运动重构任务的实际需求。
+
+考虑到原始IMU数据本身存在漂移，还可以将完整、无缺失IMU数据积分得到的轨迹作为辅助参考。前者用于评价补全结果相对于真实运动轨迹的总体误差，后者用于尽可能隔离传感器固有漂移与缺失补全误差。论文中应明确说明所使用的参考轨迹，避免将两类ATE结果混合比较。
+
+计算效率方面，记录各模型的参数数量、模型存储空间、单批次平均前向计算时间和吞吐率。单批次平均前向时间表示为
+\begin{equation}
+    t_{\mathrm{avg}}
+    =
+    \frac{1}{B}
+    \sum_{b=1}^{B}t_b,
+\end{equation}
+其中，$t_b$为第$b$次前向计算时间。吞吐率定义为单位时间内处理的样本数量。所有效率实验应在相同硬件、相同批量大小和相同输入窗口长度下进行，并在预热后重复测量，以减少初始化和缓存因素的影响。
+
+除总体指标外，还应分别统计不同缺失率、不同缺失模式和不同传感通道下的误差。对于连续通道缺失，需要进一步改变连续缺失区间长度，以判断模型能够稳定恢复的最大时间范围。消融实验至少包括移除空间邻域特征、移除双向液体网络分支、移除双向长短期记忆网络分支、将门控融合替换为固定平均融合以及移除物理约束损失。通过上述实验可以区分空间信息、混合时序结构和物理约束对最终补全性能的独立贡献。
+
+\section{本章小结}
+
+本章针对分布式传感系统在长期运行过程中出现的随机缺失和连续缺失问题，建立了统一的数据表示和缺失问题定义，并区分了缺失机制与缺失模式。在此基础上，构建了基于空间相关信息和物理信息约束的混合时序补全方法。该方法通过节点相关系数与空间距离形成邻域辅助特征，利用双向液体神经网络提取局部非规则动态特征，利用双向长短期记忆网络描述长时间依赖关系，并通过可学习门控单元完成两个分支的自适应融合。训练过程中引入加速度与速度之间的运动学约束，以提高补全结果的物理一致性。
+
+最后，本章给出了数据预处理、缺失数据模拟、对比方法、评价指标和消融实验方案。所建立的实验体系不仅评价缺失位置的逐点重构误差，还通过轨迹误差分析补全结果对下游状态估计任务的影响，并兼顾模型参数量和推理效率，为后续实验结果与讨论提供统一基础。
