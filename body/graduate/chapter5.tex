@@ -1,11 +1,608 @@
-\chapter{总结与展望}
+\chapter{连续体结构中局部传感单元对柔性段变形的影响研究}
+\label{chap:sensor_mechanical_influence}
 
-本章内容待补充。
+\section{引言}
+\label{sec:sensor_influence_intro}
 
-\section{主要结论}
+分布式传感阵列通过在连续体结构沿程布置惯性测量单元和应变传感器，将连续分布的结构变形转化为离散节点姿态与局部应变观测。由刚性测量节点和柔性连接段组成的传感链已经被用于土体、海床和工程结构形变监测，相关研究验证了利用离散姿态节点恢复连续线状形态的可行性\cite{griffith2010shapeaccelarray,cao2022longterm}。柔性或贴片式应变传感器则能够直接测量结构表面的局部拉压应变，为连续体曲率估计与形态重建提供另一类观测信息\cite{liu2025modelbased,shen2024shape}。
 
-本节内容待补充。
+现有形态重建方法通常默认传感器不会显著改变被测结构的力学特性，即传感器输出被视为原始柔性连续体在外部载荷作用下的被动观测。该假设对于尺寸较小、刚度较低的传感单元具有一定合理性，但在刚柔耦合连续体结构中并不总能成立。IMU通常安装在印制电路板、刚性封装壳体或安装基座上，其弯曲刚度可能远高于柔性承载段。应变片虽然整体厚度较小，柔顺性也明显高于IMU硬板，但敏感栅、基底、粘接层和引线仍会在局部形成附加刚度。传感单元因此不仅测量结构变形，也会参与结构变形。
 
-\section{未来工作展望}
+局部附加刚度可能产生两类影响。一方面，传感单元覆盖区域的曲率受到抑制，使原本连续分布的弯曲向相邻柔性区域转移；另一方面，传感器边缘处的刚度突变可能形成曲率和应变集中。前者会改变结构整体柔顺性及末端位移，后者则可能影响应变片测量值、粘接界面可靠性，以及基于分段常曲率或连续曲率假设的形态重建精度。如果忽略上述影响，即使传感数据没有发生缺失，测量结果与原始柔性结构真实响应之间仍可能存在系统性偏差。
 
-本节内容待补充。
+第\ref{chap:missing_data}章针对分布式传感系统中的随机缺失和连续缺失问题，建立了数据补全与物理一致性约束方法，主要解决传感信息在时间和通道维度上的完整性问题。本章进一步讨论传感器对结构本体的机械扰动，研究完整传感数据是否仍能真实表示柔性段变形。二者分别对应数据层误差和结构层误差，并共同决定后续三维形态重建的可信度。
+
+本章分别以IMU硬板和贴片式应变片为研究对象，将二者视为强刚度附加段和弱刚度附加段。首先建立局部附加层作用下的等效弯曲刚度模型，分析传感单元长度、厚度、安装位置和刚度比对柔性段曲率分布的影响；随后在COMSOL中建立包含柔性基体、传感单元和粘接层的有限元模型，对比无传感器、安装应变片和安装IMU硬板三种结构；最后通过整体位移、局部曲率、边缘应变集中和形态重建误差等指标量化两类传感单元的机械侵入程度，为后续传感器布置和刚柔耦合形态模型修正提供依据。
+
+
+\section{研究对象与问题描述}
+\label{sec:sensor_influence_problem}
+
+\subsection{刚柔耦合连续体结构}
+
+考虑长度为$L$、宽度为$b$、厚度为$h$的柔性连续体结构，弧长坐标记为$s\in[0,L]$。柔性基体的弹性模量和泊松比分别为$E_f$和$\nu_f$。在结构未安装传感器时，其截面弯曲刚度可近似表示为
+\begin{equation}
+    D_0
+    =E_f I_f
+    =\frac{E_f b h^3}{12},
+    \label{eq:bare_flexural_rigidity}
+\end{equation}
+其中$I_f$为柔性基体截面的惯性矩。
+
+当结构采用硅橡胶、热塑性聚氨酯等超弹性材料时，弹性模量不再是常数。此时可用给定变形状态下的切线弯曲刚度描述局部响应：
+\begin{equation}
+    D_{\mathrm t}
+    =\frac{\partial M}{\partial\kappa},
+    \label{eq:tangent_flexural_rigidity}
+\end{equation}
+其中$M$为截面弯矩，$\kappa$为曲率。线弹性模型主要用于解释局部刚度变化的基本趋势，材料非线性和几何大变形则由后续有限元模型处理。
+
+设传感单元覆盖区间为
+\begin{equation}
+    \Omega_s
+    =
+    \left[
+    s_0-\frac{l_s}{2},
+    s_0+\frac{l_s}{2}
+    \right],
+    \label{eq:sensor_coverage_interval}
+\end{equation}
+其中$s_0$为传感单元中心位置，$l_s$为传感单元的轴向长度。传感单元通过粘接层固定于柔性基体表面，因此覆盖区域可被视为由柔性基体、粘接层和传感结构共同组成的局部复合截面。
+
+本章设置三种基本结构：
+
+\begin{enumerate}
+    \item \textbf{Bare组：}未安装附加传感器的柔性基体；
+    \item \textbf{Gauge组：}安装贴片式应变片的柔性基体；
+    \item \textbf{IMU组：}安装IMU硬板的柔性基体。
+\end{enumerate}
+
+Bare组用于获得柔性结构不受传感器扰动时的基准响应。Gauge组表示弱刚度附加结构，IMU组表示强刚度附加结构。三组模型采用相同的柔性基体尺寸、边界条件和加载方式，以分离传感单元本身造成的力学影响。
+
+
+\subsection{IMU硬板与应变片的结构差异}
+
+IMU节点通常由印制电路板、封装芯片、焊点、连接器和局部封装材料组成。其厚度和弹性模量均可能明显高于柔性基体，因此会在连续体结构上形成有限长度的高刚度区域。该区域并非理想的零曲率刚体，但其曲率通常受到较强抑制。弯曲变形将主要由硬板两侧的柔性段承担，从而在硬板边缘形成明显的刚度过渡。
+
+应变片通常由敏感栅、聚合物基底、保护层和粘接层组成。其整体厚度远小于IMU硬板，材料也相对柔软，但附加层位于柔性基体中性轴之外。即使材料弹性模量不高，也可能通过厚度方向的平行轴效应增加复合截面的弯曲刚度。因此，不能仅根据应变片材料的弹性模量判断其机械影响，还需要同时考虑应变片厚度、宽度、粘接层和安装位置。
+
+从测量机理看，两类传感单元的影响也存在差异。IMU硬板主要通过改变所在区域的曲率分布影响节点姿态与相邻柔性段形态；应变片既会改变局部变形，又直接以粘接层传递后的表面应变作为测量量。因此，对应变片的分析还需要区分结构实际应变和传感器输出应变，并评价两者之间的应变传递关系。
+
+
+\subsection{局部复合截面的等效弯曲刚度}
+
+在各材料层保持理想粘接、截面变形协调的条件下，复合截面的等效中性轴位置可写为
+\begin{equation}
+    z_n
+    =
+    \frac{
+    \displaystyle\sum_{i=1}^{n}E_iA_i z_i
+    }{
+    \displaystyle\sum_{i=1}^{n}E_iA_i
+    },
+    \label{eq:composite_neutral_axis}
+\end{equation}
+其中$E_i$、$A_i$和$z_i$分别为第$i$层材料的弹性模量、截面积和截面形心位置。
+
+复合截面的等效弯曲刚度为
+\begin{equation}
+    D_{\mathrm{eq}}
+    =
+    \sum_{i=1}^{n}
+    E_i
+    \left[
+    I_i+A_i(z_i-z_n)^2
+    \right],
+    \label{eq:composite_flexural_rigidity}
+\end{equation}
+其中$I_i$为第$i$层材料相对于自身形心轴的截面惯性矩。
+
+由此定义局部弯曲刚度比
+\begin{equation}
+    R_D
+    =
+    \frac{D_{\mathrm{eq}}}{D_0}.
+    \label{eq:flexural_rigidity_ratio}
+\end{equation}
+
+当$R_D$接近1时，传感单元对柔性基体弯曲响应的影响较弱；当$R_D$明显大于1时，传感单元覆盖区域将表现出较强的曲率抑制。与单独使用材料模量比相比，$R_D$同时包含材料、厚度和安装偏心的影响，更适合比较IMU硬板与应变片的机械侵入程度。
+
+对于小变形梁，在弯矩$M(s)$作用下，局部曲率满足
+\begin{equation}
+    \kappa(s)
+    =
+    \frac{M(s)}{D(s)},
+    \label{eq:moment_curvature_variable_rigidity}
+\end{equation}
+其中
+\begin{equation}
+    D(s)
+    =
+    \begin{cases}
+        D_{\mathrm{eq}}, & s\in\Omega_s,\\
+        D_0, & s\notin\Omega_s.
+    \end{cases}
+    \label{eq:piecewise_flexural_rigidity}
+\end{equation}
+
+式\eqref{eq:moment_curvature_variable_rigidity}表明，在相同弯矩下，附加传感器区域的曲率将随局部弯曲刚度增大而降低。不过，分段刚度梁模型不能完整描述传感器边缘的三维应力状态、粘接层剪切变形和大变形几何效应，因此本章将其作为趋势分析模型，定量结果由COMSOL有限元计算获得。
+
+
+\section{传感单元影响机理与评价指标}
+\label{sec:influence_mechanism_metrics}
+
+\subsection{力控制与位移控制条件}
+
+传感器附加刚度在不同加载条件下具有不同表现。在端部力控制条件下，弯矩分布主要由外部载荷决定。局部刚度增加将降低结构整体柔顺性，使末端位移发生变化。以悬臂结构端部集中力$P$为例，其末端位移可近似表示为
+\begin{equation}
+    u_{\mathrm{tip}}
+    =
+    P
+    \int_0^L
+    \frac{(L-s)^2}{D(s)}
+    \mathrm ds.
+    \label{eq:tip_displacement_variable_rigidity}
+\end{equation}
+
+在端部位移控制条件下，末端位移保持不变，局部刚度增加主要表现为支座反力和界面应力变化。若仅比较固定外力条件下的位移，而不考察固定变形条件下的反力，可能无法完整反映传感器对实际驱动和接触载荷的影响。因此，COMSOL仿真同时设置力控制和位移控制工况。
+
+传感器安装位置同样可能改变其影响程度。在悬臂端部加载条件下，靠近固定端的弯矩较大，相同长度的附加刚性段可能对整体柔顺性产生更明显的影响；靠近自由端时，其对整体柔顺性的贡献可能相对较小。上述规律属于本章需要通过参数扫描验证的力学假设，不作为预设的仿真结论。
+
+
+\subsection{曲率重分配与边缘效应}
+
+当传感器覆盖区域的弯曲刚度高于相邻柔性段时，结构曲率可能不再沿弧长平滑分布。在传感器内部，曲率受到抑制；在传感器两侧，柔性段需要承担更多转角。若刚度变化发生在较短距离内，传感器边缘可能出现局部曲率梯度、界面剪切应力和柔性基体表面应变增大的现象。
+
+对于IMU硬板，上述影响可能表现为近似刚性区、过渡区和柔性区组成的分段特征。对于应变片，其刚度变化相对较小，曲率扰动可能主要集中在粘接区域及引线连接位置。两类传感器的影响不能只通过末端位移比较，还应同时评价局部曲率、界面应力和表面应变场。
+
+
+\subsection{整体变形评价指标}
+
+为统一比较Bare组、Gauge组和IMU组，定义整体位移相对变化率
+\begin{equation}
+    R_u
+    =
+    \frac{
+    u_{\mathrm{tip}}^{s}
+    -
+    u_{\mathrm{tip}}^{0}
+    }{
+    u_{\mathrm{tip}}^{0}
+    },
+    \label{eq:tip_displacement_change_ratio}
+\end{equation}
+其中$u_{\mathrm{tip}}^{0}$为Bare组末端位移，$u_{\mathrm{tip}}^{s}$为安装传感器后的末端位移。
+
+在位移控制条件下，等效刚度变化率定义为
+\begin{equation}
+    R_K
+    =
+    \frac{
+    F_{\mathrm{tip}}^{s}
+    -
+    F_{\mathrm{tip}}^{0}
+    }{
+    F_{\mathrm{tip}}^{0}
+    },
+    \label{eq:equivalent_stiffness_change_ratio}
+\end{equation}
+其中$F_{\mathrm{tip}}^{0}$和$F_{\mathrm{tip}}^{s}$分别为Bare组和传感器组达到相同端部位移时所需的反力。
+
+
+\subsection{局部曲率评价指标}
+
+传感器覆盖区域的平均曲率抑制率定义为
+\begin{equation}
+    R_{\kappa}
+    =
+    1-
+    \frac{
+    \displaystyle
+    \frac{1}{l_s}
+    \int_{\Omega_s}
+    \left|
+    \kappa^{s}(s)
+    \right|
+    \mathrm ds
+    }{
+    \displaystyle
+    \frac{1}{l_s}
+    \int_{\Omega_s}
+    \left|
+    \kappa^{0}(s)
+    \right|
+    \mathrm ds
+    },
+    \label{eq:curvature_suppression_ratio}
+\end{equation}
+其中$\kappa^{0}(s)$和$\kappa^{s}(s)$分别表示Bare组和传感器组的中心线曲率。
+
+传感器边缘的曲率集中系数定义为
+\begin{equation}
+    K_{\kappa}
+    =
+    \frac{
+    \displaystyle
+    \max_{s\in\Omega_e}
+    \left|
+    \kappa^{s}(s)
+    \right|
+    }{
+    \displaystyle
+    \max_{s\in\Omega_e}
+    \left|
+    \kappa^{0}(s)
+    \right|
+    },
+    \label{eq:edge_curvature_concentration}
+\end{equation}
+其中$\Omega_e$为传感器两端附近的过渡区域。
+
+为描述扰动向柔性段传播的范围，定义曲率扰动长度
+\begin{equation}
+    l_p
+    =
+    \operatorname{meas}
+    \left\{
+    s\in[0,L]
+    \,\middle|\,
+    \frac{
+    \left|
+    \kappa^{s}(s)-\kappa^{0}(s)
+    \right|
+    }{
+    \left|\kappa^{0}(s)\right|+\epsilon
+    }
+    >
+    \tau_{\kappa}
+    \right\},
+    \label{eq:curvature_perturbation_length}
+\end{equation}
+其中$\operatorname{meas}\{\cdot\}$表示满足条件区间的总长度，$\epsilon$用于避免分母为零，$\tau_{\kappa}$为曲率相对变化阈值。该阈值可暂取$5\%$，并根据数值误差和网格收敛结果进行调整。
+
+
+\subsection{应变片应变传递指标}
+
+对于贴片式应变片，进一步定义应变传递系数
+\begin{equation}
+    T_{\varepsilon}
+    =
+    \frac{
+    \varepsilon_{\mathrm{gauge}}
+    }{
+    \varepsilon_{\mathrm{sub}}^{0}
+    },
+    \label{eq:strain_transfer_ratio}
+\end{equation}
+其中$\varepsilon_{\mathrm{gauge}}$为应变片敏感栅区域的平均轴向应变，$\varepsilon_{\mathrm{sub}}^{0}$为相同位置处未安装应变片时柔性基体表面的轴向应变。
+
+当$T_{\varepsilon}$接近1且随载荷变化较小时，应变片输出能够较稳定地表示柔性基体表面应变；当$T_{\varepsilon}$随曲率、粘接层参数或加载方向发生明显变化时，需要在应变--曲率标定模型中进一步考虑界面传递和局部刚度影响。
+
+
+\section{COMSOL有限元模型与实验设计}
+\label{sec:comsol_model_design}
+
+\subsection{几何模型}
+
+有限元模型包含柔性基体、粘接层和传感单元三个部分。柔性基体长度、宽度和厚度分别设置为【待填】、【待填】和【待填】。IMU硬板的长度、宽度和厚度分别设置为【待填】、【待填】和【待填】，安装位置设置为【待填】。应变片的长度、宽度和厚度分别设置为【待填】、【待填】和【待填】，粘接层厚度设置为【待填】。
+
+为保证三组模型之间具有可比性，Gauge组和IMU组除传感单元及其粘接层外，均采用与Bare组相同的柔性基体几何、材料参数、边界条件和加载方式。
+
+
+\subsection{材料模型}
+
+柔性基体的材料模型根据实际样件确定。若基体在研究应变范围内近似满足线弹性关系，则采用线弹性材料模型并开启几何非线性。若基体为硅橡胶、热塑性聚氨酯或其他具有明显非线性响应的材料，则根据单轴拉伸或弯曲试验数据选择Neo-Hookean、Mooney--Rivlin或Ogden超弹性模型。
+
+IMU硬板初步采用等效均匀弹性体建模，其等效弹性模量、密度和泊松比根据印制电路板及板上器件进行均匀化处理。由于本章需要分析硬板边缘和粘接界面的应力，不将IMU硬板直接设置为数学意义上的刚性域，而是使用具有较高弹性模量的弹性实体描述。
+
+应变片可采用等效薄层模型，也可以进一步划分为聚合物基底、金属敏感栅和保护层。若显式建立敏感栅导致网格规模过大，可先通过等效轴向刚度和等效弯曲刚度完成整体分析，再针对应变传递问题建立局部精细模型。
+
+粘接层是传感器与柔性基体之间传递载荷的关键结构。初始模型采用完全粘接界面，随后改变粘接层厚度和剪切模量，分析界面柔顺性对局部曲率和应变传递的影响。本章主要研究正常粘接状态下的结构响应，暂不考虑粘接层脱粘和损伤扩展。
+
+各部分材料参数将在后续试验或产品参数确认后补充至表\ref{tab:material_parameters}。
+
+\begin{table}[!htbp]
+    \centering
+    \caption{有限元模型材料参数}
+    \label{tab:material_parameters}
+    \begin{tabular}{lcccc}
+        \toprule
+        结构组成 & 材料模型 & 弹性模量/模型参数 & 泊松比 & 密度 \\
+        \midrule
+        柔性基体 & 【待填】 & 【待填】 & 【待填】 & 【待填】 \\
+        IMU硬板 & 线弹性 & 【待填】 & 【待填】 & 【待填】 \\
+        应变片基底 & 线弹性 & 【待填】 & 【待填】 & 【待填】 \\
+        敏感栅 & 线弹性 & 【待填】 & 【待填】 & 【待填】 \\
+        粘接层 & 【待填】 & 【待填】 & 【待填】 & 【待填】 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+
+\subsection{物理场与边界条件}
+
+本章采用COMSOL中的Solid Mechanics物理场进行准静态分析，并开启几何非线性。为区分不同加载方式，设置以下工况：
+
+\begin{enumerate}
+    \item \textbf{端部力加载：}连续体一端完全固定，在另一端施加横向集中力或等效面力；
+    \item \textbf{端部位移加载：}固定端保持不变，在自由端施加给定位移，并记录端部反力；
+    \item \textbf{纯弯曲加载：}在结构端部施加转角或弯矩，用于降低剪切力变化对局部曲率分析的干扰；
+    \item \textbf{空间弯曲加载：}分别沿两个正交方向加载，用于考察IMU硬板和应变片几何形状造成的方向性；
+    \item \textbf{扭转加载：}在自由端施加扭矩，用于评价传感单元对连续体扭转柔顺性的影响。
+\end{enumerate}
+
+各加载工况采用相同的载荷等级序列。载荷上限应覆盖连续体结构实际工作范围，同时避免材料模型超出试验标定区间。具体加载参数见表\ref{tab:loading_conditions}。
+
+\begin{table}[!htbp]
+    \centering
+    \caption{有限元分析加载工况}
+    \label{tab:loading_conditions}
+    \begin{tabular}{llll}
+        \toprule
+        工况 & 控制方式 & 载荷方向 & 载荷范围 \\
+        \midrule
+        工况1 & 端部力控制 & $x$方向弯曲 & 【待填】 \\
+        工况2 & 端部力控制 & $y$方向弯曲 & 【待填】 \\
+        工况3 & 端部位移控制 & $x$方向弯曲 & 【待填】 \\
+        工况4 & 端部位移控制 & $y$方向弯曲 & 【待填】 \\
+        工况5 & 弯矩控制 & 纯弯曲 & 【待填】 \\
+        工况6 & 扭矩控制 & 绕轴向扭转 & 【待填】 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+
+\subsection{参数扫描方案}
+
+传感器机械影响由材料、尺寸、位置和粘接界面共同决定。为降低结论对单一样件参数的依赖，采用以下无量纲参数组织扫描工况：
+\begin{equation}
+    R_D
+    =
+    \frac{D_{\mathrm{eq}}}{D_0},
+    \qquad
+    \lambda_s
+    =
+    \frac{l_s}{L},
+    \qquad
+    \xi_s
+    =
+    \frac{s_0}{L},
+    \qquad
+    \chi_s
+    =
+    \frac{t_s}{h},
+    \label{eq:dimensionless_sensor_parameters}
+\end{equation}
+其中$R_D$表示局部刚度比，$\lambda_s$表示传感单元长度比，$\xi_s$表示传感单元中心位置，$\chi_s$表示传感单元与柔性基体的厚度比。
+
+IMU硬板重点考察硬板长度、厚度、安装位置和等效弯曲刚度。应变片重点考察基底厚度、粘接层厚度、粘接层剪切模量和引线约束。粘接层参数通过厚度$t_a$和剪切模量$G_a$描述。
+
+当参数数量较多时，首先采用单因素扫描识别主要影响参数，再采用正交设计或响应面方法分析参数之间的交互作用。具体参数范围将在确定样件尺寸和材料参数后补充至表\ref{tab:parametric_sweep}。
+
+\begin{table}[!htbp]
+    \centering
+    \caption{传感单元有限元参数扫描设置}
+    \label{tab:parametric_sweep}
+    \begin{tabular}{llll}
+        \toprule
+        参数 & 符号 & 扫描范围 & 研究对象 \\
+        \midrule
+        局部弯曲刚度比 & $R_D$ & 【待填】 & IMU与应变片 \\
+        传感单元长度比 & $\lambda_s$ & 【待填】 & IMU与应变片 \\
+        传感单元位置 & $\xi_s$ & 【待填】 & IMU与应变片 \\
+        传感单元厚度比 & $\chi_s$ & 【待填】 & IMU与应变片 \\
+        粘接层厚度 & $t_a$ & 【待填】 & 应变片 \\
+        粘接层剪切模量 & $G_a$ & 【待填】 & 应变片 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+
+\subsection{网格划分与模型验证}
+
+柔性基体远离传感器的区域采用相对均匀的网格，传感器边缘和粘接层附近进行局部加密。采用实体单元描述粘接层时，其厚度方向应具有足够的单元数量，以避免界面剪切应力受到单层畸变单元影响。应变片敏感栅若采用等效薄层表示，则需要检查薄层单元与基体实体单元之间的位移协调关系。
+
+网格收敛性分别以末端位移、传感器边缘最大主应变和覆盖区平均曲率为判断指标。设第$q$级和第$q+1$级网格得到的评价量分别为$y_q$和$y_{q+1}$，则网格相对误差定义为
+\begin{equation}
+    e_{\mathrm{mesh}}
+    =
+    \frac{
+    \left|y_{q+1}-y_q\right|
+    }{
+    \left|y_{q+1}\right|+\epsilon
+    }.
+    \label{eq:mesh_convergence_error}
+\end{equation}
+
+当连续两级网格之间的主要输出差异低于【待定阈值，建议为$1\%$至$2\%$】时，认为有限元结果基本收敛。Bare组的有限元结果还应与均匀悬臂梁解析解或已有样件试验结果比较，以验证边界条件和材料参数设置的合理性。
+
+仿真输出至少包括位移场、中心线曲率、最大主应变、粘接层剪切应力、端部反力和应变片敏感区域平均应变。所有输出均沿相同弧长位置采样，以便对三组结构进行逐点比较。
+
+
+\section{IMU硬板对柔性段变形的影响}
+\label{sec:imu_board_results}
+
+\subsection{整体位移与等效刚度}
+
+\textbf{本节COMSOL仿真结果待补充。}
+
+% 建议在此放置：
+% 1. Bare组与IMU组整体变形云图；
+% 2. 不同加载条件下的末端位移--载荷曲线；
+% 3. 整体位移变化率R_u和等效刚度变化率R_K；
+% 4. 不同硬板长度、厚度和安装位置下的参数扫描结果。
+
+
+\subsection{局部曲率分布与过渡区响应}
+
+\textbf{本节COMSOL仿真结果待补充。}
+
+% 建议在此报告：
+% 1. IMU硬板覆盖区域的平均曲率；
+% 2. 硬板两端的曲率峰值；
+% 3. 曲率扰动长度l_p；
+% 4. 粘接层剪切应力和柔性基体最大主应变；
+% 5. 两个正交弯曲方向下结果的差异。
+
+
+\subsection{对节点姿态和形态重建模型的影响}
+
+\textbf{本节COMSOL仿真结果待补充。}
+
+后续结果分析可比较以下两种形态描述方法：
+
+\begin{enumerate}
+    \item 将IMU节点视为无长度的离散姿态测量点；
+    \item 将IMU节点视为具有有限长度和有限弯曲刚度的结构段。
+\end{enumerate}
+
+若两种模型的中心线位置或末端位置误差存在明显差异，则说明后续形态重建需要显式表示IMU硬板的有效长度及其两侧过渡区。若硬板区域曲率接近但不等于零，则应采用有限刚度约束代替理想刚性约束。
+
+
+\section{应变片对柔性段变形的影响}
+\label{sec:strain_gauge_results}
+
+\subsection{整体柔顺性变化}
+
+\textbf{本节COMSOL仿真结果待补充。}
+
+% 建议比较：
+% 1. Gauge组与Bare组在相同外力下的末端位移；
+% 2. Gauge组与Bare组在相同端部位移下的端部反力；
+% 3. 不同应变片基底厚度和粘接层参数下的整体刚度变化。
+
+
+\subsection{局部曲率与应变传递}
+
+\textbf{本节COMSOL仿真结果待补充。}
+
+% 建议给出：
+% 1. 应变片覆盖区及两端的曲率分布；
+% 2. 柔性基体表面应变、粘接层应变和敏感栅应变；
+% 3. 应变传递系数T_epsilon；
+% 4. 粘接层厚度和剪切模量的影响；
+% 5. 存在与不存在引线约束时的对比结果。
+
+
+\subsection{对应变--曲率映射关系的影响}
+
+\textbf{本节COMSOL仿真结果待补充。}
+
+现有形态重建方法通常根据截面表面应变计算曲率，并通过标定矩阵补偿安装误差\cite{an2024shape}。本节后续应根据COMSOL结果判断应变片输出与未安装传感器时柔性基体表面应变是否保持稳定比例关系。
+
+若应变传递系数$T_{\varepsilon}$在不同曲率范围内近似恒定，可将其并入应变--曲率标定矩阵。若$T_{\varepsilon}$随曲率、加载方向或粘接状态发生明显变化，则需要采用分段标定或非线性补偿模型。
+
+
+\section{两类传感单元的对比与模型修正}
+\label{sec:sensor_comparison_correction}
+
+IMU硬板和应变片分别代表强刚度附加结构和弱刚度附加结构。两类传感单元应在统一载荷、统一安装位置和统一评价指标下进行比较。最终结果可整理为表\ref{tab:sensor_influence_comparison}。
+
+\begin{table}[!htbp]
+    \centering
+    \caption{不同传感单元对连续体柔性段变形的影响}
+    \label{tab:sensor_influence_comparison}
+    \resizebox{\textwidth}{!}{
+    \begin{tabular}{lccccccc}
+        \toprule
+        传感结构
+        & $R_D$
+        & $R_u$
+        & $R_K$
+        & $R_{\kappa}$
+        & $K_{\kappa}$
+        & $l_p$
+        & $T_{\varepsilon}$ \\
+        \midrule
+        Bare组
+        & 1
+        & 0
+        & 0
+        & 0
+        & 1
+        & 0
+        & -- \\
+        Gauge组
+        & 【待填】
+        & 【待填】
+        & 【待填】
+        & 【待填】
+        & 【待填】
+        & 【待填】
+        & 【待填】 \\
+        IMU组
+        & 【待填】
+        & 【待填】
+        & 【待填】
+        & 【待填】
+        & 【待填】
+        & 【待填】
+        & -- \\
+        \bottomrule
+    \end{tabular}
+    }
+\end{table}
+
+对后续三维形态重建而言，IMU硬板的修正重点是有限长度高刚度段及其两侧过渡区。现有模型可以将刚性连接段的曲率设置为零，但该处理是否合理需要由本章仿真结果判断。若硬板区域仍存在不可忽略的变形，更合适的处理方式是引入沿弧长变化的弯曲刚度$D(s)$，并在高刚度区域提高曲率变化的正则权重，而不是强制曲率严格为零。
+
+在连续曲率优化模型中，可将均匀空间光滑项
+\begin{equation}
+    J_s
+    =
+    \lambda_s
+    \int_0^L
+    \left\|
+    \frac{\partial^2\bm\kappa(s)}
+    {\partial s^2}
+    \right\|_2^2
+    \mathrm ds
+    \label{eq:uniform_curvature_regularization}
+\end{equation}
+扩展为位置相关形式
+\begin{equation}
+    J_s^{D}
+    =
+    \int_0^L
+    \lambda_D(s)
+    \left\|
+    \frac{\partial^2\bm\kappa(s)}
+    {\partial s^2}
+    \right\|_2^2
+    \mathrm ds,
+    \label{eq:rigidity_weighted_regularization}
+\end{equation}
+其中$\lambda_D(s)$根据本章识别的局部弯曲刚度设置。对于IMU硬板覆盖区域，可取较大的正则权重；对于柔性连接段，则保留较低的正则权重，以允许结构发生连续弯曲。
+
+应变片的修正重点是局部刚度变化和应变传递。对于机械影响较弱且$T_{\varepsilon}$稳定的应变片，可继续采用标定矩阵修正测量结果。修正后的应变--曲率关系可表示为
+\begin{equation}
+    \hat{\bm\kappa}^{\varepsilon}
+    =
+    \bm C_{\varepsilon}
+    \bm T_{\varepsilon}^{-1}
+    \left(
+    \bm\varepsilon^{\mathrm{meas}}
+    -
+    \bm\varepsilon^{0}
+    \right),
+    \label{eq:strain_transfer_corrected_curvature}
+\end{equation}
+其中$\bm C_{\varepsilon}$为应变--曲率标定矩阵，$\bm T_{\varepsilon}$为不同应变测量通道对应的应变传递系数矩阵，$\bm\varepsilon^{0}$为应变片零点偏置。
+
+若应变片的机械影响不可忽略，则还应在$\bm C_{\varepsilon}$中考虑复合截面中性轴偏移和局部弯曲刚度变化。由此，本章结果可以向后续形态重建模型提供传感单元有效长度、局部等效弯曲刚度、过渡区扰动长度和应变传递系数等参数，使连续曲率模型由均匀柔性连续体扩展为具有位置相关刚度和传感响应的刚柔耦合连续体。
+
+
+\section{本章小结}
+\label{sec:sensor_influence_summary}
+
+本章针对传感器安装可能改变连续体柔性段变形的问题，建立了局部附加传感结构的力学分析与有限元评价框架。根据结构刚度和测量机理的差异，将IMU硬板和贴片式应变片分别视为强刚度附加段和弱刚度附加段，并通过复合截面等效弯曲刚度描述传感单元材料、厚度和安装偏心的综合影响。
+
+本章区分了力控制和位移控制条件，提出以整体位移变化、等效刚度变化、曲率抑制率、边缘曲率集中、扰动长度和应变传递系数作为评价指标。COMSOL模型将分别比较无传感器、安装应变片和安装IMU硬板三种结构，并通过材料、尺寸、位置和粘接参数扫描确定两类传感单元对柔性段变形的影响范围。
+
+% TODO：完成COMSOL仿真后，在此补充主要定量结论。
+% 建议包括：
+% 1. IMU硬板造成的整体刚度变化和曲率扰动范围；
+% 2. 应变片造成的局部刚度变化和应变传递误差；
+% 3. 哪些影响可通过标定补偿；
+% 4. 哪些影响必须在结构设计或形态重建模型中显式考虑。
+
+本章研究从结构力学层面补充分布式传感数据的可信性分析，其结果将为后续连续体结构三维形态重建中的分段刚度设置、IMU节点建模和应变--曲率标定提供参数基础。
